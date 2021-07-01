@@ -69,7 +69,7 @@ pub fn try_set_price(deps: DepsMut, sender: Addr, price: Coin) -> Result<Respons
 
 pub fn try_recieve(deps: DepsMut, msg: Cw20ReceiveMsg) -> Result<Response, ContractError> {
     STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        state.balance = msg.amount;
+        state.balance = state.balance + msg.amount;
         Ok(state)
     })?;
 

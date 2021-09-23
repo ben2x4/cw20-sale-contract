@@ -1,0 +1,18 @@
+junod tx wasm store sale.wasm --from bob --chain-id lucina --gas auto --gas-adjustment 1.3
+junod tx wasm instantiate 15 '{"decimals":0,"initial_balances":[{"address":"juno1ms8tvfkerhyf6mca2qc79t7mr3eh9dsrpcdajn","amount":"1000000000000"}],"name":"Poodle Coin","symbol":"POOD"}' --from bob --label="Poodle Coin" --gas="auto" --chain-id="lucina"
+
+
+pood contract = juno1pez5706uvjfz9y4nkx68w3j5ls8yufmvplprge
+
+junod query wasm contract-state smart juno1pez5706uvjfz9y4nkx68w3j5ls8yufmvplprge '{"balance":{"address":"juno1ms8tvfkerhyf6mca2qc79t7mr3eh9dsrpcdajn"}}' --chain-id="lucina"
+
+junod tx wasm instantiate 16 '{"cw20_address":"juno1pez5706uvjfz9y4nkx68w3j5ls8yufmvplprge", "denom":"ujuno", "price":"1000"}'  --from bob --label="Poodle Coin Sale" --gas="auto" --chain-id="lucina"
+
+sale contract = juno1x4vt5xndndzq664rxtqrrqu9py9qndp3rcu06q
+
+junod query wasm contract-state smart juno1x4vt5xndndzq664rxtqrrqu9py9qndp3rcu06q '{"get_balance":{}}' --chain-id="lucina"
+junod query wasm contract-state smart juno1x4vt5xndndzq664rxtqrrqu9py9qndp3rcu06q '{"get_price":{}}' --chain-id="lucina"
+
+junod tx wasm execute juno1pez5706uvjfz9y4nkx68w3j5ls8yufmvplprge '{"send":{"amount":"1","contract":"juno1x4vt5xndndzq664rxtqrrqu9py9qndp3rcu06q","msg":""}}' --from bob --chain-id="lucina"
+
+junod tx wasm execute juno1x4vt5xndndzq664rxtqrrqu9py9qndp3rcu06q '{"buy":{}}' --amount "1000ujuno" --from bob --chain-id="lucina"

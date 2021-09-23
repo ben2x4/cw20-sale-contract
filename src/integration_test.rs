@@ -62,9 +62,10 @@ fn sale_happy_path() {
 
     // set up sale contract
     let sale_id = router.store_code(contract_sale());
+    let price = Uint128::from(1u128);
     let msg = InstantiateMsg {
         cw20_address: cash_addr.clone(),
-        price: Uint128::from(1u128),
+        price,
         denom: NATIVE_TOKEN_DENOM.to_string(),
     };
     let sale_addr = router
@@ -110,7 +111,10 @@ fn sale_happy_path() {
     assert_eq!(buyer_balance, Uint128(0));
 
     // Buy cw20tokens through sale contract
-    let buy_msg = ExecuteMsg::Buy {};
+    let buy_msg = ExecuteMsg::Buy {
+        denom: NATIVE_TOKEN_DENOM.to_string(),
+        price,
+    };
     let res = router
         .execute_contract(
             buyer.clone(),

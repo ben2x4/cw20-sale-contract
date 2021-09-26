@@ -1,4 +1,4 @@
-use cosmwasm_std::StdError;
+use cosmwasm_std::{StdError, Uint128};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -18,4 +18,12 @@ pub enum ContractError {
 
     #[error("Invalid subtraction")]
     SubtractionError {},
+
+    #[error("Price provided is not current")]
+    PriceNotCurrentError {
+        denom_current: String,
+        denom_provided: String,
+        price_current: Uint128,
+        price_provided: Uint128,
+    },
 }

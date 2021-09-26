@@ -33,7 +33,19 @@
       ],
       "properties": {
         "buy": {
-          "type": "object"
+          "type": "object",
+          "required": [
+            "denom",
+            "price"
+          ],
+          "properties": {
+            "denom": {
+              "type": "string"
+            },
+            "price": {
+              "$ref": "#/definitions/Uint128"
+            }
+          }
         }
       },
       "additionalProperties": false

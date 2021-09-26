@@ -4,7 +4,7 @@ use cosmwasm_std::{
 };
 
 use crate::error::ContractError;
-use crate::msg::{BalanceResponse, ExecuteMsg, InstantiateMsg, PriceResponse, QueryMsg};
+use crate::msg::{ExecuteMsg, InfoResponse, InstantiateMsg, QueryMsg};
 use crate::state::{State, STATE};
 
 use cw20::{Cw20ExecuteMsg, Cw20ReceiveMsg};
@@ -49,8 +49,8 @@ pub fn execute(
                 amount: price,
             },
         ),
-        ExecuteMsg::Receive(msg) => try_recieve(deps, msg),
-        ExecuteMsg::Buy {} => try_buy(deps, info),
+        ExecuteMsg::Receive(msg) => try_receive(deps, msg),
+        ExecuteMsg::Buy { denom, price } => try_buy(deps, info, denom, price),
         ExecuteMsg::WithdrawAll {} => try_withdraw_all(deps, info.sender),
     }
 }
@@ -67,17 +67,32 @@ pub fn try_set_price(deps: DepsMut, sender: Addr, price: Coin) -> Result<Respons
     Ok(Response::default())
 }
 
-pub fn try_recieve(deps: DepsMut, msg: Cw20ReceiveMsg) -> Result<Response, ContractError> {
+pub fn try_receive(deps: DepsMut, msg: Cw20ReceiveMsg) -> Result<Response, ContractError> {
     STATE.update(deps.storage, |mut state| -> Result<_, ContractError> {
-        state.balance = state.balance + msg.amount;
+        state.balance += msg.amount;
         Ok(state)
     })?;
 
     Ok(Response::default())
 }
 
-pub fn try_buy(deps: DepsMut, info: MessageInfo) -> Result<Response, ContractError> {
+pub fn try_buy(
+    deps: DepsMut,
+    info: MessageInfo,
+    denom: String,
+    price: Uint128,
+) -> Result<Response, ContractError> {
     let state = STATE.load(deps.storage).unwrap();
+
+    if denom != state.price.denom || price != state.price.amount {
+        return Err(ContractError::PriceNotCurrentError {
+            denom_current: state.price.denom,
+            denom_provided: denom,
+            price_current: state.price.amount,
+            price_provided: price,
+        });
+    }
+
     let mut funds = Coin {
         amount: Uint128(0),
         denom: state.price.denom.clone(),
@@ -173,19 +188,16 @@ pub fn try_withdraw_all(deps: DepsMut, sender: Addr) -> Result<Response, Contrac
 #[entry_point]
 pub fn query(deps: Deps, _env: Env, msg: QueryMsg) -> StdResult<Binary> {
     match msg {
-        QueryMsg::GetPrice {} => to_binary(&query_price(deps)?),
-        QueryMsg::GetBalance {} => to_binary(&query_balance(deps)?),
+        QueryMsg::GetInfo {} => to_binary(&query_info(deps)?),
     }
 }
 
-fn query_price(deps: Deps) -> StdResult<PriceResponse> {
+fn query_info(deps: Deps) -> StdResult<InfoResponse> {
     let state = STATE.load(deps.storage)?;
-    Ok(PriceResponse { price: state.price })
-}
-
-fn query_balance(deps: Deps) -> StdResult<BalanceResponse> {
-    let state = STATE.load(deps.storage)?;
-    Ok(BalanceResponse {
+    Ok(InfoResponse {
+        owner: state.owner,
+        cw20_address: state.cw20_address,
+        price: state.price,
         balance: state.balance,
     })
 }
@@ -212,8 +224,8 @@ mod tests {
         assert_eq!(0, res.messages.len());
 
         // it worked, let's query the state
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetPrice {}).unwrap();
-        let value: PriceResponse = from_binary(&res).unwrap();
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetInfo {}).unwrap();
+        let value: InfoResponse = from_binary(&res).unwrap();
         assert_eq!(Uint128::from(7u128), value.price.amount);
     }
 
@@ -238,8 +250,8 @@ mod tests {
         let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         // check price
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetPrice {}).unwrap();
-        let value: PriceResponse = from_binary(&res).unwrap();
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetInfo {}).unwrap();
+        let value: InfoResponse = from_binary(&res).unwrap();
         assert_eq!(Uint128::from(2u128), value.price.amount);
 
         // non-owner cannot change price
@@ -252,8 +264,8 @@ mod tests {
         assert!(_res.is_err());
 
         // check price
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetPrice {}).unwrap();
-        let value: PriceResponse = from_binary(&res).unwrap();
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetInfo {}).unwrap();
+        let value: InfoResponse = from_binary(&res).unwrap();
         assert_eq!(Uint128::from(2u128), value.price.amount);
     }
 
@@ -278,19 +290,20 @@ mod tests {
         let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         // check balance
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetBalance {}).unwrap();
-        let value: BalanceResponse = from_binary(&res).unwrap();
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetInfo {}).unwrap();
+        let value: InfoResponse = from_binary(&res).unwrap();
         assert_eq!(Uint128(10), value.balance);
     }
 
     #[test]
     fn buy_token() {
         let mut deps = mock_dependencies(&coins(2, "token"));
-
+        let price: Uint128 = Uint128::from(7u128);
+        let denom: String = "utoken".to_string();
         let msg = InstantiateMsg {
             cw20_address: Addr::unchecked("asdf"),
-            price: Uint128::from(7u128),
-            denom: "utoken".to_string(),
+            price,
+            denom: denom.clone(),
         };
         let info = mock_info("creator", &coins(2, "utoken"));
         let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -304,19 +317,28 @@ mod tests {
         let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         // basic buy
-        let msg = ExecuteMsg::Buy {};
+        let msg = ExecuteMsg::Buy {
+            price: Uint128(7),
+            denom: denom.clone(),
+        };
         let info = mock_info("buyer", &coins(14, "utoken"));
         let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(_res.attributes.first().unwrap(), &attr("amount", 2));
 
         // over pay
-        let msg = ExecuteMsg::Buy {};
+        let msg = ExecuteMsg::Buy {
+            denom: denom.clone(),
+            price,
+        };
         let info = mock_info("buyer", &coins(20, "utoken"));
         let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
         assert_eq!(_res.attributes.first().unwrap(), &attr("amount", 2));
 
         // wrong denom
-        let msg = ExecuteMsg::Buy {};
+        let msg = ExecuteMsg::Buy {
+            denom: denom.clone(),
+            price,
+        };
         let info = mock_info("buyer", &coins(2, "uwrong"));
         let _res = execute(deps.as_mut(), mock_env(), info, msg);
         assert!(_res.is_err());
@@ -326,10 +348,12 @@ mod tests {
     fn buy_token_with_multiple_coins() {
         let mut deps = mock_dependencies(&coins(2, "token"));
 
+        let price: Uint128 = Uint128::from(7u128);
+        let denom: String = "utoken".to_string();
         let msg = InstantiateMsg {
             cw20_address: Addr::unchecked("asdf"),
-            price: Uint128::from(7u128),
-            denom: "utoken".to_string(),
+            price,
+            denom: denom.clone(),
         };
         let info = mock_info("creator", &coins(2, "utoken"));
         let _res = instantiate(deps.as_mut(), mock_env(), info, msg).unwrap();
@@ -343,7 +367,7 @@ mod tests {
         let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         // buy with three types of funds
-        let msg = ExecuteMsg::Buy {};
+        let msg = ExecuteMsg::Buy { denom, price };
         let funds: [Coin; 3] = [
             Coin {
                 amount: Uint128(7),
@@ -384,8 +408,8 @@ mod tests {
         let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         // check balance
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetBalance {}).unwrap();
-        let value: BalanceResponse = from_binary(&res).unwrap();
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetInfo {}).unwrap();
+        let value: InfoResponse = from_binary(&res).unwrap();
         assert_eq!(Uint128(10), value.balance);
 
         let info = mock_info("creator", &coins(2, "token"));
@@ -393,8 +417,8 @@ mod tests {
         let _res = execute(deps.as_mut(), mock_env(), info, msg).unwrap();
 
         // check balance
-        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetBalance {}).unwrap();
-        let value: BalanceResponse = from_binary(&res).unwrap();
+        let res = query(deps.as_ref(), mock_env(), QueryMsg::GetInfo {}).unwrap();
+        let value: InfoResponse = from_binary(&res).unwrap();
         assert_eq!(Uint128(0), value.balance);
     }
 
